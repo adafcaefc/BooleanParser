@@ -6,6 +6,24 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/replace.hpp>
 
+namespace Utils
+{
+    std::vector<bool> to_bit_vector(
+        int n, 
+        const unsigned int pad)
+    {
+        std::vector<bool> buffer;
+        while (n > 0)
+        {
+            buffer.push_back(n % 2);
+            n /= 2;
+        }
+        for (auto i = buffer.size(); i < pad; ++i) { buffer.push_back(false); }
+        return buffer;
+    }
+}
+
+// to do : make this object-oriented (?)
 enum class TokenType
 {
     kNull,
@@ -21,21 +39,26 @@ enum class TokenType
     kRightBracket,
 };
 
+using variables_map_t = std::unordered_map<std::string, bool>;
+
 struct Token
 {
+    // token type with ugly enums, could be using oop...
     TokenType type;
     std::string data;
+    // priority_1 = bracket, priority_2 = operation priority
     int priority_1 = 0, priority_2 = 0;
+    // needed for operation, filled later (linked list)
     Token* left = nullptr;
     Token* right = nullptr;
-
-    bool value(std::unordered_map<std::string, bool> map = std::unordered_map<std::string, bool>())
+    bool value(const variables_map_t& map = variables_map_t())
     { 
         if (this->type == TokenType::kTrue || this->type == TokenType::kFalse) { return this->type == TokenType::kTrue; }
-        return map[this->data];
+        return map.at(this->data);
     }
     Token(const bool value) : type(value ? TokenType::kTrue : TokenType::kFalse) {}
     Token(const TokenType _type, const std::string& _data) : type(_type), data(_data) {}
+    // morphing...
     void set_type(const bool value) 
     {
         this->type = value ? TokenType::kTrue : TokenType::kFalse;
@@ -43,10 +66,10 @@ struct Token
     }
 };
 
-
 namespace Tokeniser
 {
 #   define TOKENISE_M(s, result) if (tokenise_impl(expression, s)) { return Token(TokenType::result, s); }
+
     bool tokenise_impl(
         std::string* expression,
         const std::string& token)
@@ -61,6 +84,7 @@ namespace Tokeniser
 
     Token tokenise_internal(std::string* expression)
     {
+        // macro hell :>
         TOKENISE_M("true", kTrue);
         TOKENISE_M("t", kTrue);
         TOKENISE_M("false", kFalse);
@@ -108,30 +132,22 @@ namespace Tokeniser
     }
 };
 
-std::vector<bool> to_bit_vector(int n, unsigned int pad)
-{
-    std::vector<bool> buffer;
-    while (n > 0)
-    {
-        buffer.push_back(n % 2);
-        n /= 2;
-    }
-    for (auto i = buffer.size(); i < pad; ++i) { buffer.push_back(false); }
-    return buffer;
-}
-
 struct TokenisedExpression
 {
 private:
     std::vector<Token> tokens, raw_tokens;
-    std::unordered_map<std::string, bool> variables;
+    variables_map_t variables;
+    using variable_pair_t = std::pair<const std::string, bool>;
+
     void proccess_internal()
     {
         std::vector<Token> new_tokens;
         int state = 0;
         for (auto& token : this->raw_tokens)
         {
+            // increase the priority of not operator
             if (token.type == TokenType::kNot) { token.priority_2 = 1; }
+            // parse brackets
             if (token.type == TokenType::kLeftBracket) 
             { 
                 state += 1; 
@@ -151,25 +167,17 @@ private:
 
     void load_variables()
     {
+        // create variable map
         for (auto& token : this->tokens)
         {
             if (token.type != TokenType::kVariable) continue;
-
             this->variables[token.data] = false;
         }
     }
 
-public:
-
-    TokenisedExpression(const std::string& expression)
-    {
-        this->raw_tokens = Tokeniser::tokenise_raw_string(expression);
-        this->proccess_internal();
-        this->load_variables();
-    }
-
     void procces_block_link(std::vector<Token>* block)
     {
+        // write the linked list
         for (auto i = 0u; i < block->size(); ++i)
         {
             if (i == 0u)
@@ -188,16 +196,25 @@ public:
         }
     }
 
+    // helper function to get the current variable value
     bool variable_value(const std::string& variable) { return this->variables[variable]; }
 
+    // to do : throw an exception when function fail to parse expression
+    // [p v q v r] still crashes...
     void proccess_block(std::vector<Token>* block)
     {
         std::vector<Token> block_copy = *block;
         std::vector<Token> block_new;
-        procces_block_link(&block_copy);
+        this->procces_block_link(&block_copy);
         int max_priority = -1;
         for (auto& token : block_copy)
         {
+            // this could be made using oop
+            // struct IToken 
+            // {
+            //   virtual bool is_operator() { return true; }; 
+            //   ...
+            // }
             switch (token.type)
             {
             case TokenType::kNot:
@@ -211,11 +228,22 @@ public:
                 break;
             }
         }
-        //std::cout << block_copy.size() << '\n';
         for (auto& token : block_copy)
         {
-            //std::cout << token.right << '\n';
-            //std::cout << token.left << '\n' << '\n';
+            // this could be made using oop
+            // struct IToken 
+            // {
+            //   virtual bool process() = 0; 
+            //   ...
+            // }
+            // struct OrToken : public IToken 
+            // {
+            //   bool process(const variables_map_t& map) override
+            //   {
+            //     return this->left->value(map) || this->right->value(map);
+            //   }
+            //   ...
+            // }
             if (token.priority_2 != max_priority) continue;
             switch (token.type)
             {
@@ -270,7 +298,7 @@ public:
             {
                 while (block.size() > 1)
                 {
-                    proccess_block(const_cast<std::vector<Token>*>(&block));
+                    this->proccess_block(const_cast<std::vector<Token>*>(&block));
                 }
                 const_cast<std::vector<Token>*>(&block)->front().priority_1--;
             }
@@ -294,7 +322,6 @@ public:
             }
         }
         blocks_new.push_back(block_new);
-
         *blocks = blocks_new;
     }
 
@@ -314,24 +341,9 @@ public:
             block.push_back(token);
         }
         blocks.push_back(block);
-
-        while (blocks.size() > 1 || blocks.front().size() > 1) 
-        { 
-            //for (auto& block : blocks)
-            //{
-            //    for (auto& token : block)
-            //    {
-            //        std::cout << token.data << '[' << token.priority_1 << ']' << '\t';
-            //    }
-            //    std::cout << '\n';
-            //}
-            process_blocks(&blocks);
-            //std::cout << '\n';
-        }
-        //std::cout << blocks.front().front().data << '\n' << '\n' << '\n' << '\n';
+        while (blocks.size() > 1 || blocks.front().size() > 1) { process_blocks(&blocks); }
         return blocks.front().front().value();
     }
-
 
     void print_all_expression()
     {
@@ -346,18 +358,17 @@ public:
             std::cout << token.data << ' ';
         }
         std::cout << "\n------------------------------------------------------------------------------------------------\n";
-        
-        std::vector<std::pair<const std::string, bool>*> map_pairs;
-        for (auto& entry : this->variables) { map_pairs.push_back(const_cast<std::pair<const std::string, bool>*>(&entry)); }
-        
+
+        std::vector<variable_pair_t*> map_pairs;
+        for (auto& entry : this->variables) { map_pairs.push_back(const_cast<variable_pair_t*>(&entry)); }
+
         for (auto i = 0u; i < std::pow(2, this->variables.size()); i++)
         {
-            const auto bits = to_bit_vector(i, map_pairs.size());
+            const auto bits = Utils::to_bit_vector(i, map_pairs.size());
             for (auto j = 0u; j < map_pairs.size(); ++j)
             {
                 map_pairs.at(j)->second = bits.at(j);
             }
-            //run_expression();
             std::cout << ' ';
             for (auto& variable : this->variables)
             {
@@ -365,6 +376,15 @@ public:
             }
             std::cout << "   " << (run_expression() ? 'T' : 'F') << '\n';
         }
+    }
+
+public:
+    TokenisedExpression(const std::string& expression)
+    {
+        this->raw_tokens = Tokeniser::tokenise_raw_string(expression);
+        this->proccess_internal();
+        this->load_variables();
+        this->print_all_expression();
     }
 };
 
@@ -376,24 +396,6 @@ int main()
         std::cout << "Input expression : ";
         std::getline(std::cin, input);
         TokenisedExpression exp(input);
-        exp.print_all_expression();
         std::cout << '\n';
     }
-
-
-    //TokenisedExpression exp("((!p and FaLSe) V (!qV ~r)) -> false");
-    //exp.print_all_expression();
-    //std::cout << '\n';
-    //TokenisedExpression exp2("((p->r) || (p->q)) -> false");
-    //exp2.print_all_expression();
-    //std::cout << '\n';
-    //try
-    //{
-    //    TokenisedExpression exp3("((~a->!b) || (!c->!d)) -> !e");
-    //    exp3.print_all_expression();
-    //}
-    //catch (const std::exception& e)
-    //{
-    //    std::cout << e.what();
-    //}
 }
