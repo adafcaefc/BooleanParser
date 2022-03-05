@@ -3,3 +3,8 @@
 .vs/BooleanParser/v16/.suo
 .vs/VSWorkspaceState.json
 .vs/BooleanParser/v16/Browse.VC.db
+incl/
+.vscode/settings.json
+.vscode/tasks.json
+app.exe
+*.exe
